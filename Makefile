@@ -3,7 +3,7 @@ BIN_DIR = bin
 #export GOPATH=$(CURR_DIR)
 GO_BUILD = GOBIN=$(CURR_DIR)/$(BIN_DIR) go install ./src/$@
 
-all: server master clientmain clientol
+all: server master clientmain clientol eaasclient
 
 server:
 	$(GO_BUILD)
@@ -18,6 +18,9 @@ clientmain:
 	$(GO_BUILD)
 
 clientol:
+	$(GO_BUILD)
+
+eaasclient:
 	$(GO_BUILD)
 
 .PHONY: clean
