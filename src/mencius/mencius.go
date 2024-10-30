@@ -1,15 +1,15 @@
 package mencius
 
 import (
-	"dlog"
+	"github.com/copilot/src/dlog"
 	"encoding/binary"
-	"fastrpc"
-	"genericsmr"
-	"genericsmrproto"
+	"github.com/copilot/src/fastrpc"
+	"github.com/copilot/src/genericsmr"
+	"github.com/copilot/src/genericsmrproto"
 	"io"
 	"log"
-	"menciusproto"
-	"state"
+	"github.com/copilot/src/menciusproto"
+	"github.com/copilot/src/state"
 	"time"
 )
 

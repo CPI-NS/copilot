@@ -3,9 +3,9 @@ package latentcopilotproto
 import (
 	"bufio"
 	"encoding/binary"
-	"fastrpc"
+	"github.com/copilot/src/fastrpc"
 	"io"
-	"state"
+	"github.com/copilot/src/state"
 	"sync"
 )
 

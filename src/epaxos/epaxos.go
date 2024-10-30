@@ -1,18 +1,18 @@
 package epaxos
 
 import (
-	"bloomfilter"
-	"dlog"
+	"github.com/copilot/src/bloomfilter"
+	"github.com/copilot/src/dlog"
 	"encoding/binary"
-	"epaxosproto"
-	"fastrpc"
+	"github.com/copilot/src/epaxosproto"
+	"github.com/copilot/src/fastrpc"
 	"fmt"
-	"genericsmr"
-	"genericsmrproto"
+	"github.com/copilot/src/genericsmr"
+	"github.com/copilot/src/genericsmrproto"
 	"io"
 	"log"
 	"math"
-	"state"
+	"github.com/copilot/src/state"
 	"sync"
 	"time"
 )

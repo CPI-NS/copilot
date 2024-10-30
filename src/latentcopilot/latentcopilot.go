@@ -1,24 +1,24 @@
 package latentcopilot
 
 import (
-	"bloomfilter"
+	"github.com/copilot/src/bloomfilter"
 	"bufio"
-	"dlog"
+	"github.com/copilot/src/dlog"
 	"encoding/binary"
-	"fastrpc"
+	"github.com/copilot/src/fastrpc"
 	"fmt"
-	"genericsmr"
-	"genericsmrproto"
+	"github.com/copilot/src/genericsmr"
+	"github.com/copilot/src/genericsmrproto"
 	"io"
-	"latentcopilotproto"
+	"github.com/copilot/src/latentcopilotproto"
 	"log"
 	"math"
 	"os"
 	"sort"
-	"state"
+	"github.com/copilot/src/state"
 	"sync"
 	"time"
-	"viewchangeproto"
+	"github.com/copilot/src/viewchangeproto"
 )
 
 const NUM_LEADERS = 2

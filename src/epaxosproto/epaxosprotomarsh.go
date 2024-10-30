@@ -3,10 +3,10 @@ package epaxosproto
 import (
 	"io"
 	"sync"
-	"fastrpc"
+	"github.com/copilot/src/fastrpc"
 	"bufio"
 	"encoding/binary"
-	"state"
+	"github.com/copilot/src/state"
 )
 
 type byteReader interface {

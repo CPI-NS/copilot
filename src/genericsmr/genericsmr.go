@@ -2,17 +2,17 @@ package genericsmr
 
 import (
 	"bufio"
-	"dlog"
+	"github.com/copilot/src/dlog"
 	"encoding/binary"
-	"fastrpc"
+	"github.com/copilot/src/fastrpc"
 	"fmt"
-	"genericsmrproto"
+	"github.com/copilot/src/genericsmrproto"
 	"io"
 	"log"
 	"net"
 	"os"
-	"rdtsc"
-	"state"
+	"github.com/copilot/src/rdtsc"
+	"github.com/copilot/src/state"
 	"time"
 )
 

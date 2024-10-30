@@ -1,10 +1,10 @@
 package epaxos
 
 import (
-	"epaxosproto"
+	"github.com/copilot/src/epaxosproto"
 	"fmt"
-	"genericsmr"
-	"state"
+	"github.com/copilot/src/genericsmr"
+	"github.com/copilot/src/state"
 	"testing"
 )
 

@@ -1,16 +1,16 @@
 package paxos
 
 import (
-	"dlog"
+	"github.com/copilot/src/dlog"
 	"encoding/binary"
-	"fastrpc"
+	"github.com/copilot/src/fastrpc"
 	"fmt"
-	"genericsmr"
-	"genericsmrproto"
+	"github.com/copilot/src/genericsmr"
+	"github.com/copilot/src/genericsmrproto"
 	"io"
 	"log"
-	"paxosproto"
-	"state"
+	"github.com/copilot/src/paxosproto"
+	"github.com/copilot/src/state"
 	"time"
 )
 

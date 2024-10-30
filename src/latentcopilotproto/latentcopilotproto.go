@@ -1,7 +1,7 @@
 package latentcopilotproto
 
 import (
-	"state"
+	"github.com/copilot/src/state"
 )
 
 type Prepare struct {

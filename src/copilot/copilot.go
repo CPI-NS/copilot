@@ -1,23 +1,23 @@
 package copilot
 
 import (
-	"bloomfilter"
+	"github.com/copilot/src/bloomfilter"
 	"bufio"
-	"copilotproto"
-	"dlog"
+	"github.com/copilot/src/copilotproto"
+	"github.com/copilot/src/dlog"
 	"encoding/binary"
-	"fastrpc"
+	"github.com/copilot/src/fastrpc"
 	"fmt"
-	"genericsmr"
-	"genericsmrproto"
+	"github.com/copilot/src/genericsmr"
+	"github.com/copilot/src/genericsmrproto"
 	"io"
 	"log"
 	"math"
 	"sort"
-	"state"
+	"github.com/copilot/src/state"
 	"sync"
 	"time"
-	"viewchangeproto"
+	"github.com/copilot/src/viewchangeproto"
 )
 
 const NUM_LEADERS = 2

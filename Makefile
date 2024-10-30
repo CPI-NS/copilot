@@ -1,7 +1,7 @@
 CURR_DIR = $(shell pwd)
 BIN_DIR = bin
-export GOPATH=$(CURR_DIR)
-GO_BUILD = GOBIN=$(CURR_DIR)/$(BIN_DIR) go install $@
+#export GOPATH=$(CURR_DIR)
+GO_BUILD = GOBIN=$(CURR_DIR)/$(BIN_DIR) go install ./src/$@
 
 all: server master clientmain clientol
 

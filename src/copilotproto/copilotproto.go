@@ -1,7 +1,7 @@
 package copilotproto
 
 import (
-	"state"
+	"github.com/copilot/src/state"
 )
 
 type Prepare struct {

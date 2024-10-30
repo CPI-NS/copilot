@@ -6,7 +6,7 @@ Created on Tue May  3 09:53:43 2016
 """
 import sys
 
-path_prefix = "/proj/cops/khiem/slowdown/experiments/latest/"
+path_prefix = "~/copilot/eexperiments/latest/"
 min_t = float("inf")
 sys_tput_map = dict()
 tput_interval_in_sec = 1.0

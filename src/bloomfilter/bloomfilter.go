@@ -1,7 +1,7 @@
 package bloomfilter
 
 import (
-	"bitvec"
+	"github.com/copilot/src/bitvec"
 	"math"
 )
 

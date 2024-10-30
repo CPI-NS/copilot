@@ -2,12 +2,12 @@ package main
 
 import (
 	"bufio"
-	"dlog"
+	"github.com/copilot/src/dlog"
 	"flag"
 	"fmt"
-	"genericsmrproto"
+	"github.com/copilot/src/genericsmrproto"
 	"log"
-	"masterproto"
+	"github.com/copilot/src/masterproto"
 	"math/rand"
 	"net"
 	"net/rpc"
@@ -18,7 +18,7 @@ import (
 	"runtime/debug"
 	"runtime/pprof"
 	"sort"
-	"state"
+	"github.com/copilot/src/state"
 	"strconv"
 	"time"
 )

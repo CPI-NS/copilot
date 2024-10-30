@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -x
+#set -x
 
 # protocol to run: "copilot", "latentcopilot", "epaxos", "multipaxos" (default)
 proto=$1
@@ -58,7 +58,7 @@ fi
 threads=$((clients / cnodes))
 #echo $threads
 
-masterAddr="node-1"
+masterAddr="node1"
 masterPort="7087"
 serverPort="7070"
 
@@ -76,7 +76,7 @@ echo -e "Running ${proto} at $(date)\t${exp_uid}\t${n}\t${clients}\t${cnodes}" >
 # Cleanup
 totalNodes=$((n + cnodes + 1))
 for i in $(seq 1 $totalNodes); do
-  (ssh -t -t -o StrictHostKeyChecking=no node-$i "\
+  (ssh -t -t -o StrictHostKeyChecking=no node$i "\
 	cd $prefix; ./killall.sh") &
   pid=$!
   pids="$pids $pid"
@@ -87,7 +87,7 @@ done
 
 # Start Master
 for i in $(seq 1 1); do
-  ssh node-$i -o StrictHostKeyChecking=no "\
+  ssh node$i -o StrictHostKeyChecking=no "\
 	cd $prefix; \
 	bin/master \
 	-N=$n \
@@ -98,8 +98,8 @@ done
 # Start Servers
 declare -a pids
 for i in $(seq 2 $((n + 1))); do
-  ssh -o StrictHostKeyChecking=no node-$i "\
-	cd $prefix; bin/server -maddr=${masterAddr} -mport=${masterPort} -addr=node-$i -port=${serverPort} -e=$doEpaxos -copilot=$doCopilot -latentcopilot=$doLatentCopilot -exec=$exec -dreply=$reply -durable=$durable -p=$cpus -thrifty=$thrifty" \
+  ssh -o StrictHostKeyChecking=no node$i "\
+	cd $prefix; bin/server -maddr=${masterAddr} -mport=${masterPort} -addr=node$i -port=${serverPort} -e=$doEpaxos -copilot=$doCopilot -latentcopilot=$doLatentCopilot -exec=$exec -dreply=$reply -durable=$durable -p=$cpus -thrifty=$thrifty" \
     2>&1 | awk '{ print "Server-'$i': "$0 }' &
   sleep 2
 done
@@ -128,10 +128,10 @@ for i in $(seq 0 $((cnodes - 1))); do
 
     # Note: to use an open-loop client, replace the line "bin/clientmain..." with the following line:
     # bin/clientol -maddr=${masterAddr} -mport=${masterPort} -q=$reqs -check=true -e=$doEpaxos -twoLeaders=$doTwoLeaders -numKeys=${numkeys} -c=$conflicts -id=$clientId -cpuprofile=${cpuprofile} -prefix=$outputDir -runtime=$length -trim=${trim} -w=$writes -proxy=$proxyReplica -p=$cpus -tput_interval_in_sec=${tput_interval_in_sec} -target_rps=${target_rps}" \
-    ssh node-${nodeId} -o StrictHostKeyChecking=no "\
+    ssh node${nodeId} -o StrictHostKeyChecking=no "\
     cd $prefix;
     bin/clientmain -maddr=${masterAddr} -mport=${masterPort} -q=$reqs -check=true -e=$doEpaxos -twoLeaders=$doTwoLeaders -numKeys=${numkeys} -c=$conflicts -id=$clientId -cpuprofile=${cpuprofile} -prefix=$outputDir -runtime=$length -trim=${trim} -w=$writes -proxy=$proxyReplica -p=$cpus -tput_interval_in_sec=${tput_interval_in_sec}" \
-      2>&1 | awk '{ print "Client-'$clientId'(node-'$nodeId'): "$0 }' &
+      2>&1 | awk '{ print "Client-'$clientId'(node'$nodeId'): "$0 }' &
     pid=$!
     pids="$pids $pid"
 
@@ -149,7 +149,7 @@ sleep 2
 
 # Cleanup
 for i in $(seq 1 $totalNodes); do
-  ssh -t -t -o StrictHostKeyChecking=no node-$i "\
+  ssh -t -t -o StrictHostKeyChecking=no node$i "\
 	cd $prefix; ./killall.sh"
 done
 

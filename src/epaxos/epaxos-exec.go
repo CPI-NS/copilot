@@ -2,8 +2,8 @@ package epaxos
 
 import (
 	//    "state"
-	"epaxosproto"
-	"genericsmrproto"
+	"github.com/copilot/src/epaxosproto"
+	"github.com/copilot/src/genericsmrproto"
 	"sort"
 	"time"
 )

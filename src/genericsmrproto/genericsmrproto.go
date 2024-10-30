@@ -1,7 +1,7 @@
 package genericsmrproto
 
 import (
-	"state"
+	"github.com/copilot/src/state"
 )
 
 const (

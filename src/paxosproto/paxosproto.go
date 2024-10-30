@@ -1,7 +1,7 @@
 package paxosproto
 
 import (
-	"state"
+	"github.com/copilot/src/state"
 )
 
 const (

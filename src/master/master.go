@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"genericsmrproto"
+	"github.com/copilot/src/genericsmrproto"
 	"log"
-	"masterproto"
+	"github.com/copilot/src/masterproto"
 	"net"
 	"net/http"
 	"net/rpc"
