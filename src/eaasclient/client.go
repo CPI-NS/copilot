@@ -349,7 +349,7 @@ func Put() {
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
     id := int32(0)
-		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: 0, V: 2}, time.Now().UnixNano()}
+		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: 0, V: 36}, time.Now().UnixNano()}
 
 		/* Prepare proposal */
 		dlog.Printf("Sending proposal %d\n", id)
@@ -477,7 +477,6 @@ func Put() {
 }
 
 func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, viewChangeChan chan *View, expected int) {
-  fmt.Println("wait Replies pilot")
 
 	var msgType byte
 	var err error
@@ -496,6 +495,7 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 			}
 			if reply.OK != 0 {
 				successful[leader]++
+        fmt.Println("Command reply value: " , reply.Value)
 				done <- Response{reply.CommandId, time.Now(), reply.Timestamp}
 				if expected == successful[leader] {
 					return
