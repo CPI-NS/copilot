@@ -481,6 +481,9 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 	var msgType byte
 	var err error
 
+  //TODO: Put this in the interface functions themselves? 
+  //TODO: What is a view reply ? Do we need it ?
+  //TODO: What even are views?
 	reply := new(genericsmrproto.ProposeReplyTS)
 	getViewReply := new(genericsmrproto.GetViewReply)
 	for true {
