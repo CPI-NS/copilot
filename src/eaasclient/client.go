@@ -94,8 +94,8 @@ var throughputs []DataPoint
 /*
   Variables taken out of main and made global for EAAS
 */
-var tput_interval_in_sec time.Duration
-var lastThroughputTime time.Time
+//var tput_interval_in_sec time.Duration
+//var lastThroughputTime time.Time
 var views []*View
 var leader int 
 var leader2 int 
@@ -108,7 +108,7 @@ var reqsCount int64 = 0
 var isRandomLeader bool
 var put []bool
 //var before_total time.Time
-var readings chan *DataPoint
+//var readings chan *DataPoint
 /*
   End of variables put to global for EAAS
 */
@@ -163,13 +163,9 @@ func main() {
 
 	N = len(rlReply.ReplicaList)
 	servers := make([]net.Conn, N)
-	//readers := make([]*bufio.Reader, N)
-	//writers := make([]*bufio.Writer, N)
 	readers = make([]*bufio.Reader, N)
 	writers = make([]*bufio.Writer, N)
 
-	//rarray := make([]int, *reqsNb)
-	//put := make([]bool, *reqsNb)
 	put = make([]bool, *reqsNb)
 
 	karray := make([]int64, *reqsNb)
@@ -236,22 +232,14 @@ func main() {
 	}
 
 	time.Sleep(5 * time.Second)
-	/*registerClientIdSuccessful := waitRegisterClientIdReplies(readers, N)
-	fmt.Printf("Client Id Registration succeeds: %d out of %d\n", registerClientIdSuccessful, N)*/
 
 	successful = make([]int, N)
-	//leader := -1
 	leader = -1
 
 	// second leader
-	//leader2 := -1
 	leader2 = -1
 
-	//isRandomLeader := false
 	isRandomLeader = false
-
-	// views for two leaders
-	//var views []*View
 
 	if *noLeader == false {
 
@@ -293,13 +281,6 @@ func main() {
 	}
 
 	var done chan bool
-	//var readings chan *DataPoint
-	tput_interval_in_sec = time.Duration(*tput_interval * 1e9)
-	if *verbose {
-		done = make(chan bool, 1)
-		readings = make(chan *DataPoint, 600)
-		go printer(readings, done)
-	}
 
   pilot0ReplyChan = make(chan Response, *reqsNb)
   viewChangeChan = make(chan *View, 100)
@@ -322,10 +303,6 @@ func main() {
   Get()
   /* EAAS END */
 
-	if *verbose && readings != nil {
-		close(readings)
-	}
-
 	time.Sleep(1 * time.Second)
 
 	// Clean up
@@ -342,6 +319,134 @@ func main() {
 
 func Get(){
   fmt.Println("In Get")
+    var pilotErr, pilotErr1 error
+    var lastGVSent0, lastGVSent1 time.Time
+    id := int32(1)
+		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: 0, V: 36}, time.Now().UnixNano()}
+
+		/* Prepare proposal */
+		dlog.Printf("Sending proposal %d\n", id)
+
+		before := time.Now()
+		timestamps = append(timestamps, before)
+
+		repliedCmdId := int32(-1)
+		var to *time.Timer
+		succeeded := false
+		if *twoLeaders {
+      fmt.Println("two leaders" , *twoLeaders)
+			for {
+				// Check if there is newer view
+				for i := 0; i < len(viewChangeChan); i++ {
+					newView := <-viewChangeChan
+					if newView.ViewId > views[newView.PilotId].ViewId {
+						views[newView.PilotId].PilotId = newView.PilotId
+						views[newView.PilotId].ReplicaId = newView.ReplicaId
+						views[newView.PilotId].ViewId = newView.ViewId
+						views[newView.PilotId].Active = true
+					}
+				}
+
+				// get random server to ask about new view
+				serverId := rand.Intn(N)
+				if views[0].Active {
+					leader = int(views[0].ReplicaId)
+					pilotErr = nil
+					if leader >= 0 {
+						writers[leader].WriteByte(genericsmrproto.PROPOSE)
+						args.Marshal(writers[leader])
+						pilotErr = writers[leader].Flush()
+						if pilotErr != nil {
+							views[0].Active = false
+						} else {
+							succeeded = true
+						}
+					}
+				}
+				if !views[0].Active {
+					leader = -1
+					if lastGVSent0 == (time.Time{}) || time.Since(lastGVSent0) >= GET_VIEW_TIMEOUT {
+						for ; serverId == 0; serverId = rand.Intn(N) {
+						}
+						getViewArgs := &genericsmrproto.GetView{0}
+						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
+						getViewArgs.Marshal(writers[serverId])
+						writers[serverId].Flush()
+						lastGVSent0 = time.Now()
+					}
+				}
+
+				if views[1].Active {
+					leader2 = int(views[1].ReplicaId)
+					/* Send to second leader for two-leader protocol */
+					pilotErr1 = nil
+					if *twoLeaders && !*sendOnce && leader2 >= 0 {
+						writers[leader2].WriteByte(genericsmrproto.PROPOSE)
+						args.Marshal(writers[leader2])
+						pilotErr1 = writers[leader2].Flush()
+						if pilotErr1 != nil {
+							views[1].Active = false
+						} else {
+							succeeded = true
+						}
+					}
+				}
+				if !views[1].Active {
+					leader2 = -1
+					if lastGVSent1 == (time.Time{}) || time.Since(lastGVSent1) >= GET_VIEW_TIMEOUT {
+						for ; serverId == 1; serverId = rand.Intn(N) {
+						}
+						getViewArgs := &genericsmrproto.GetView{1}
+						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
+						getViewArgs.Marshal(writers[serverId])
+						writers[serverId].Flush()
+						lastGVSent1 = time.Now()
+					}
+				}
+				if !succeeded {
+					continue
+				}
+
+				// we successfully sent to at least one pilot
+				succeeded = false
+				to = time.NewTimer(REQUEST_TIMEOUT)
+				toFired := false
+				for true {
+					select {
+					case e := <-pilot0ReplyChan:
+						repliedCmdId = e.OpId
+						if repliedCmdId == id {
+							to.Stop()
+							succeeded = true
+						}
+
+					case <-to.C:
+						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
+						repliedCmdId = -1
+						succeeded = false
+						toFired = true
+
+					default:
+					}
+
+					if succeeded {
+						if *check {
+							rsp[id] = true
+						}
+						reqsCount++
+						break
+					} else if toFired {
+						break
+					}
+				} // end of foor loop waiting for result
+				// successfully get the response. continue with the next request
+				if succeeded {
+					break
+				} else if toFired {
+					continue
+				}
+			} // end of copilot
+		} 
 }
 
 func Put() {
@@ -474,6 +579,9 @@ func Put() {
 				}
 			} // end of copilot
 		} 
+
+     
+
 }
 
 func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, viewChangeChan chan *View, expected int) {
@@ -498,7 +606,11 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 			}
 			if reply.OK != 0 {
 				successful[leader]++
-        fmt.Println("Command reply value: " , reply.Value)
+        /* */
+        fmt.Println("Op ", reply.CommandId, "Command reply value: " , reply.Value)
+        /* */
+        /*EAAS: Gets sent to the reply channel in the function */
+        /*TODO: add value to the response? */
 				done <- Response{reply.CommandId, time.Now(), reply.Timestamp}
 				if expected == successful[leader] {
 					return
@@ -519,33 +631,6 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 			break
 		}
 	}
-
-}
-
-func waitRegisterClientIdReplies(readers []*bufio.Reader, n int) int {
-
-	if n > len(readers) {
-		return -1
-	}
-
-	success := 0
-	reply := new(genericsmrproto.RegisterClientIdReply)
-	for i := 0; i < n; i++ {
-		i := 0
-		//for success < n {
-		if err := reply.Unmarshal(readers[i]); err != nil {
-			fmt.Println("Error when reading RegisterClientIdReply from replica", i, ":", err)
-			i = (i + 1) % n
-			continue
-		}
-		if reply.OK != 0 {
-			success++
-		}
-
-		i = (i + 1) % n
-	}
-
-	return success
 
 }
 
