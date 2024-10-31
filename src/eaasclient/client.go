@@ -80,6 +80,7 @@ type Response struct {
 	OpId       int32
 	rcvingTime time.Time
 	timestamp  int64
+  Value state.Value
 }
 
 type View struct {
@@ -94,8 +95,6 @@ var throughputs []DataPoint
 /*
   Variables taken out of main and made global for EAAS
 */
-//var tput_interval_in_sec time.Duration
-//var lastThroughputTime time.Time
 var views []*View
 var leader int 
 var leader2 int 
@@ -107,13 +106,18 @@ var viewChangeChan chan *View
 var reqsCount int64 = 0
 var isRandomLeader bool
 var put []bool
-//var before_total time.Time
-//var readings chan *DataPoint
 /*
   End of variables put to global for EAAS
 */
 
 func main() {
+  StartClient()
+  Put()
+  Get()
+}
+
+//func main() {
+func StartClient() {
 
 	flag.Parse()
 
@@ -280,7 +284,7 @@ func main() {
 		}
 	}
 
-	var done chan bool
+	//var done chan bool
 
   pilot0ReplyChan = make(chan Response, *reqsNb)
   viewChangeChan = make(chan *View, 100)
@@ -288,33 +292,6 @@ func main() {
     go waitRepliesPilot(readers, i, pilot0ReplyChan, viewChangeChan, *reqsNb*2)
   }
 
-	latencies = make([]int64, 0, *reqsNb)
-	readlatencies = make([]int64, 0, *reqsNb)
-	writelatencies = make([]int64, 0, *reqsNb)
-	timestamps = make([]time.Time, 0, *reqsNb)
-
-	throughputs = make([]DataPoint, 0, 600)
-
-	time.Sleep(5 * time.Second)
-
-   
-  /* EAAS START */
-  Put()
-  Get()
-  /* EAAS END */
-
-	time.Sleep(1 * time.Second)
-
-	// Clean up
-	for _, client := range servers {
-		if client != nil {
-			client.Close()
-		}
-	}
-	if *verbose && done != nil {
-		<-done
-	}
-	master.Close()
 }
 
 func Get(){
@@ -322,7 +299,7 @@ func Get(){
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
     id := int32(1)
-		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: 0, V: 36}, time.Now().UnixNano()}
+		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: 0, V: 0}, time.Now().UnixNano()}
 
 		/* Prepare proposal */
 		dlog.Printf("Sending proposal %d\n", id)
@@ -334,7 +311,6 @@ func Get(){
 		var to *time.Timer
 		succeeded := false
 		if *twoLeaders {
-      fmt.Println("two leaders" , *twoLeaders)
 			for {
 				// Check if there is newer view
 				for i := 0; i < len(viewChangeChan); i++ {
@@ -419,6 +395,7 @@ func Get(){
 							to.Stop()
 							succeeded = true
 						}
+            fmt.Println("Value in Get: ", e.Value)
 
 					case <-to.C:
 						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
@@ -466,7 +443,6 @@ func Put() {
 		var to *time.Timer
 		succeeded := false
 		if *twoLeaders {
-      fmt.Println("two leaders" , *twoLeaders)
 			for {
 				// Check if there is newer view
 				for i := 0; i < len(viewChangeChan); i++ {
@@ -551,6 +527,7 @@ func Put() {
 							to.Stop()
 							succeeded = true
 						}
+            fmt.Println("Value in Put ", e.Value)
 
 					case <-to.C:
 						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
@@ -611,7 +588,7 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
         /* */
         /*EAAS: Gets sent to the reply channel in the function */
         /*TODO: add value to the response? */
-				done <- Response{reply.CommandId, time.Now(), reply.Timestamp}
+				done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
 				if expected == successful[leader] {
 					return
 				}
