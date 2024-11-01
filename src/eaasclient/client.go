@@ -17,6 +17,7 @@ import (
 	"runtime/pprof"
 	"github.com/copilot/src/state"
 	"time"
+  "github.com/EaaS"
 )
 
 const REQUEST_TIMEOUT = 100 * time.Millisecond
@@ -262,6 +263,7 @@ func StartClient() {
     go waitRepliesPilot(readers, i, pilot0ReplyChan, viewChangeChan, *reqsNb*2)
   }
 
+
 }
 
 /* Get(key, columns[], numColumns, results[]) */
@@ -398,7 +400,7 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
 			} // end of copilot
 		} 
 
-    return 0
+    return EaaS.EAAS_W_EC_SUCCESS
 }
 
 /* Put(key, columns[], values[], size) */
