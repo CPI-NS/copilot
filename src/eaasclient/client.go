@@ -105,15 +105,25 @@ var pilot0ReplyChan chan Response
 var viewChangeChan chan *View
 var reqsCount int64 = 0
 var isRandomLeader bool
-var put []bool
+var reqNum int = 0
 /*
   End of variables put to global for EAAS
 */
 
 func main() {
   StartClient()
-  Put(6)
-  Get(6)
+  result := make([]int32, 2)
+  values := make([]int32, 2)
+  values[0] = 92
+  Put(6, nil, values, 0)
+  Get(6, nil, 0, result)
+  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
+  values[0] = 37
+  Put(7, nil, values, 0)
+  Get(7, nil, 0, result)
+  fmt.Println("Get Result for key 7: expected: 37, actual: ", result[0])
+  Get(6, nil, 0, result)
+  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
 }
 
 //func main() {
@@ -147,9 +157,6 @@ func StartClient() {
 		clientId = uint32(*cid)
 	}
 
-	r := rand.New(rand.NewSource(int64(clientId)))
-	zipf := rand.NewZipf(r, *s, *v, *numKeys)
-
 	if *conflicts > 100 {
 		log.Fatalf("Conflicts percentage must be between 0 and 100.\n")
 	}
@@ -169,43 +176,6 @@ func StartClient() {
 	servers := make([]net.Conn, N)
 	readers = make([]*bufio.Reader, N)
 	writers = make([]*bufio.Writer, N)
-
-	put = make([]bool, *reqsNb)
-
-	karray := make([]int64, *reqsNb)
-	if *noLeader { /*epaxos*/
-		for i := 0; i < len(karray); i++ {
-
-			if *conflicts >= 0 {
-				r := rand.Intn(100)
-				if r < *conflicts {
-					karray[i] = 0
-				} else {
-					// karray[i] = int64(43 + i)
-					karray[i] = (int64(i) << 32) | int64(clientId)
-				}
-				r = rand.Intn(100)
-				if r < *writes {
-					put[i] = true
-				} else {
-					put[i] = false
-				}
-			} else {
-				karray[i] = int64(zipf.Uint64())
-			}
-		}
-	} else {
-		for i := 0; i < len(karray); i++ {
-			karray[i] = rand.Int63n(int64(*numKeys))
-
-			r := rand.Intn(100)
-			if r < *writes {
-				put[i] = true
-			} else {
-				put[i] = false
-			}
-		}
-	}
 
 	if *conflicts >= 0 {
 		fmt.Println("Uniform distribution")
@@ -294,11 +264,13 @@ func StartClient() {
 
 }
 
-func Get(key int64){
+/* Get(key, columns[], numColumns, results[]) */
+func Get(key int64, _ []int32, _ int, result []int32) int{
   fmt.Println("In Get")
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
-    id := int32(1)
+    id := int32(reqNum)
+    reqNum += 1
 		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: state.Key(key), V: 0}, time.Now().UnixNano()}
 
 		/* Prepare proposal */
@@ -395,7 +367,8 @@ func Get(key int64){
 							to.Stop()
 							succeeded = true
 						}
-            fmt.Println("Value in Get: ", e.Value)
+//            fmt.Println("Value in Get: ", e.Value)
+            result[0] = int32(e.Value)
 
 					case <-to.C:
 						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
@@ -424,14 +397,18 @@ func Get(key int64){
 				}
 			} // end of copilot
 		} 
+
+    return 0
 }
 
-func Put(key int64) {
+/* Put(key, columns[], values[], size) */
+func Put(key int64, _ []int32, values []int32, _ int) int {
     fmt.Println("In PUT")
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
-    id := int32(0)
-		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: state.Key(key), V: 36}, time.Now().UnixNano()}
+    id := int32(reqNum)
+    reqNum += 1
+		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: state.Key(key), V: state.Value(values[0])}, time.Now().UnixNano()}
 
 		/* Prepare proposal */
 		dlog.Printf("Sending proposal %d\n", id)
@@ -527,7 +504,7 @@ func Put(key int64) {
 							to.Stop()
 							succeeded = true
 						}
-            fmt.Println("Value in Put ", e.Value)
+//            fmt.Println("Value in Put ", e.Value)
 
 					case <-to.C:
 						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
@@ -557,8 +534,7 @@ func Put(key int64) {
 			} // end of copilot
 		} 
 
-     
-
+    return 0
 }
 
 func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, viewChangeChan chan *View, expected int) {
@@ -566,9 +542,6 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 	var msgType byte
 	var err error
 
-  //TODO: Put this in the interface functions themselves? 
-  //TODO: What is a view reply ? Do we need it ?
-  //TODO: What even are views?
 	reply := new(genericsmrproto.ProposeReplyTS)
 	getViewReply := new(genericsmrproto.GetViewReply)
 	for true {
@@ -583,11 +556,6 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 			}
 			if reply.OK != 0 {
 				successful[leader]++
-        /* */
-        fmt.Println("Op ", reply.CommandId, "Command reply value: " , reply.Value)
-        /* */
-        /*EAAS: Gets sent to the reply channel in the function */
-        /*TODO: add value to the response? */
 				done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
 				if expected == successful[leader] {
 					return

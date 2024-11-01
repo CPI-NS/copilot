@@ -1188,7 +1188,6 @@ func (r *Replica) checkAllDepsExecuted(leaderId int, start, end int32) bool {
 }
 
 func (r *Replica) executeBatch(leaderId int, instNum int32) bool {
-    fmt.Println("Executing batch")
 
 	inst := r.InstanceSpace[leaderId][instNum]
 	if inst == nil {
@@ -1225,7 +1224,6 @@ func (r *Replica) executeBatch(leaderId int, instNum int32) bool {
 	}
 	st := time.Now()
 	count := 0
-  fmt.Println("len(inst.Cmds)", len(inst.Cmds))
 	for j := 0; j < len(inst.Cmds); j++ {
 
 		reqSt := time.Now()
@@ -1239,7 +1237,6 @@ func (r *Replica) executeBatch(leaderId int, instNum int32) bool {
 
 		var val state.Value
 		if !exists {
-      fmt.Println("Executing commands ID: ", inst.Cmds[j].Op)
 			val = inst.Cmds[j].Execute(r.State)
 			r.execMap[k] = true
 			//r.latestOps[clientId] = opId
@@ -1263,7 +1260,6 @@ func (r *Replica) executeBatch(leaderId int, instNum int32) bool {
 				opId,
 				val,
 				b} /*instance number*/
-      fmt.Println("Writing command result to channel")
 			r.ReplyProposeTS(propreply, writer)
 			r.execMap[k] = true
 			//r.latestOps[clientId] = opId
