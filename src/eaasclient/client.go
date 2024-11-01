@@ -112,8 +112,8 @@ var put []bool
 
 func main() {
   StartClient()
-  Put()
-  Get()
+  Put(6)
+  Get(6)
 }
 
 //func main() {
@@ -294,12 +294,12 @@ func StartClient() {
 
 }
 
-func Get(){
+func Get(key int64){
   fmt.Println("In Get")
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
     id := int32(1)
-		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: 0, V: 0}, time.Now().UnixNano()}
+		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: state.Key(key), V: 0}, time.Now().UnixNano()}
 
 		/* Prepare proposal */
 		dlog.Printf("Sending proposal %d\n", id)
@@ -426,12 +426,12 @@ func Get(){
 		} 
 }
 
-func Put() {
+func Put(key int64) {
     fmt.Println("In PUT")
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
     id := int32(0)
-		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: 0, V: 36}, time.Now().UnixNano()}
+		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: state.Key(key), V: 36}, time.Now().UnixNano()}
 
 		/* Prepare proposal */
 		dlog.Printf("Sending proposal %d\n", id)
