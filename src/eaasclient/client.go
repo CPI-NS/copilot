@@ -20,7 +20,7 @@ import (
   "github.com/EaaS"
 )
 
-const REQUEST_TIMEOUT = 100 * time.Millisecond
+const REQUEST_TIMEOUT = 10000 * time.Millisecond
 const GET_VIEW_TIMEOUT = 100 * time.Millisecond
 const GC_DEBUG_ENABLED = false
 const PRINT_STATS = false
@@ -112,22 +112,30 @@ var reqNum int = 0
 */
 
 func main() {
+  EaaS.EaasInit()
+  EaaS.EaasRegister(Put, "put")
+  EaaS.EaasRegister(Get, "get")
+  EaaS.EaasRegister(DBTeardown, "db_teardown")
+  EaaS.EaasRegister(DBInit, "db_init")
+  
   StartClient()
-  result := make([]int32, 2)
-  values := make([]int32, 2)
-  values[0] = 92
-  Put(6, nil, values, 0)
-  Get(6, nil, 0, result)
-  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
-  values[0] = 37
-  Put(7, nil, values, 0)
-  Get(7, nil, 0, result)
-  fmt.Println("Get Result for key 7: expected: 37, actual: ", result[0])
-  Get(6, nil, 0, result)
-  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
+
+  EaaS.EaasStartGRPC()
+ // result := make([]int32, 2)
+ // values := make([]int32, 2)
+ // values[0] = 92
+ // Put(6, nil, values, 0)
+ // Get(6, nil, 0, result)
+ // fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
+ // values[0] = 37
+ // Put(7, nil, values, 0)
+ // Get(7, nil, 0, result)
+ // fmt.Println("Get Result for key 7: expected: 37, actual: ", result[0])
+ // Get(6, nil, 0, result)
+ // fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
 }
 
-//func main() {
+
 func StartClient() {
 
 	flag.Parse()
@@ -262,13 +270,20 @@ func StartClient() {
   for i := 0; i < N; i++ {
     go waitRepliesPilot(readers, i, pilot0ReplyChan, viewChangeChan, *reqsNb*2)
   }
+}
 
+/* not applicable for copilot but EAAS still needs the function stub */
+func DBTeardown() int {
+  return EaaS.EAAS_W_EC_SUCCESS
+}
 
+/* not applicable for copilot but EAAS still needs the function stub */
+func DBInit(_ int, _ []int) int {
+  return EaaS.EAAS_W_EC_SUCCESS
 }
 
 /* Get(key, columns[], numColumns, results[]) */
 func Get(key int64, _ []int32, _ int, result []int32) int{
-  fmt.Println("In Get")
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
     id := int32(reqNum)
@@ -372,11 +387,11 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
 //            fmt.Println("Value in Get: ", e.Value)
             result[0] = int32(e.Value)
 
-					case <-to.C:
-						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
-						repliedCmdId = -1
-						succeeded = false
-						toFired = true
+//					case <-to.C:
+//						fmt.Printf("Client %v: TIMEOUT for GET() request %v\n", clientId, id)
+//						repliedCmdId = -1
+//						succeeded = false
+//						toFired = true
 
 					default:
 					}
@@ -405,7 +420,6 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
 
 /* Put(key, columns[], values[], size) */
 func Put(key int64, _ []int32, values []int32, _ int) int {
-    fmt.Println("In PUT")
     var pilotErr, pilotErr1 error
     var lastGVSent0, lastGVSent1 time.Time
     id := int32(reqNum)
@@ -509,7 +523,7 @@ func Put(key int64, _ []int32, values []int32, _ int) int {
 //            fmt.Println("Value in Put ", e.Value)
 
 					case <-to.C:
-						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
+						fmt.Printf("Client %v: TIMEOUT for PUT() request %v\n", clientId, id)
 						repliedCmdId = -1
 						succeeded = false
 						toFired = true

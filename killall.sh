@@ -1,5 +1,5 @@
 #!/bin/bash
 
-for pid in $(ps x | grep "bin\/master\|bin\/server\|bin\/.*client.*" | awk '{ print $1 }'); do
+for pid in $(ps x | grep "master|server" | awk '{ print $1 }'); do
     kill $pid
 done
