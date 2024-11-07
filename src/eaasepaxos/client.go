@@ -109,7 +109,8 @@ var leader int
 var leader2 int
 var readers []*bufio.Reader
 var writers []*bufio.Writer
-var leaderReplyChan chan int32
+//var leaderReplyChan chan int32
+var leaderReplyChan chan Response
 var pilot0ReplyChan chan Response
 var reqsCount int64 
 var isRandomLeader bool
@@ -118,21 +119,29 @@ var readings chan *DataPoint
 var reqNum int = 0
 
 func main() {
+  EaaS.EaasInit()
+  EaaS.EaasRegister(Put, "put")
+  EaaS.EaasRegister(Get, "get")
+  EaaS.EaasRegister(DBTeardown, "db_teardown")
+  EaaS.EaasRegister(DBInit, "db_init")
+
   StartClient()
-  result := make([]int32, 2)
-  values := make([]int32, 2)
-  values[0] = 92
-  fmt.Println("Calling Put")
-  Put(6, nil, values, 0)
-  fmt.Println("Calling Get")
-  Get(6, nil, 0, result)
-  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
-  values[0] = 37
-  Put(7, nil, values, 0)
-  Get(7, nil, 0, result)
-  fmt.Println("Get Result for key 7: expected: 37, actual: ", result[0])
-  Get(6, nil, 0, result)
-  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
+
+  EaaS.EaasStartGRPC()
+//  result := make([]int32, 2)
+//  values := make([]int32, 2)
+//  values[0] = 92
+//  fmt.Println("Calling Put")
+//  Put(6, nil, values, 0)
+//  fmt.Println("Calling Get")
+//  Get(6, nil, 0, result)
+//  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
+//  values[0] = 37
+//  Put(7, nil, values, 0)
+//  Get(7, nil, 0, result)
+//  fmt.Println("Get Result for key 7: expected: 37, actual: ", result[0])
+//  Get(6, nil, 0, result)
+//  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
 }
 
 func StartClient() {
@@ -318,7 +327,7 @@ func StartClient() {
 
 	// with pre-specified leader, we know which reader to check reply
 	if !*twoLeaders {
-		leaderReplyChan = make(chan int32, *reqsNb)
+		leaderReplyChan = make(chan Response, *reqsNb)
 		if isRandomLeader {
 			go waitRepliesRandomLeader(readers, N, leaderReplyChan)
 		} else {
@@ -508,7 +517,7 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
 			for true {
 				select {
 				case e := <-leaderReplyChan:
-					repliedCmdId = e
+					repliedCmdId = e.OpId
 					rcvingTime = time.Now()
           result[0] = int32(e.Value)
 				default:
@@ -691,7 +700,7 @@ func Put(key int64, _ []int32, values []int32, _ int) int {
 			for true {
 				select {
 				case e := <-leaderReplyChan:
-					repliedCmdId = e
+					repliedCmdId = e.OpId
 					rcvingTime = time.Now()
 				default:
 				}
@@ -709,7 +718,8 @@ func Put(key int64, _ []int32, values []int32, _ int) int {
     return EaaS.EAAS_W_EC_SUCCESS
 }
 
-func waitReplies(readers []*bufio.Reader, leader int, n int, done chan int32, expected int) {
+func waitReplies(readers []*bufio.Reader, leader int, n int, done chan Response, expected int) {
+  fmt.Println("Not Random Leader")
 	var msgType byte
 	var err error
 	reply := new(genericsmrproto.ProposeReplyTS)
@@ -727,7 +737,8 @@ func waitReplies(readers []*bufio.Reader, leader int, n int, done chan int32, ex
 			if reply.OK != 0 {
 				successful[leader]++
 				//done <- &Response{OpId: reply.CommandId, rcvingTime: time.Now()}
-				done <- reply.CommandId
+				//done <- reply.CommandId
+        done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
 				if expected == successful[leader] {
 					return
 				}
@@ -739,7 +750,9 @@ func waitReplies(readers []*bufio.Reader, leader int, n int, done chan int32, ex
 	}
 }
 
-func waitRepliesRandomLeader(readers []*bufio.Reader, n int, done chan int32) {
+//func waitRepliesRandomLeader(readers []*bufio.Reader, n int, done chan int32) {
+func waitRepliesRandomLeader(readers []*bufio.Reader, n int, done chan Response) {
+  fmt.Println("Random Leader")
 	var msgType byte
 	var err error
 	reply := new(genericsmrproto.ProposeReplyTS)
@@ -758,7 +771,8 @@ func waitRepliesRandomLeader(readers []*bufio.Reader, n int, done chan int32) {
 				if reply.OK != 0 {
 					successful[i]++
 					//done <- &Response{OpId: reply.CommandId, rcvingTime: time.Now()}
-					done <- reply.CommandId
+          done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
+					//done <- reply.CommandId
 				}
 				break
 			default:
