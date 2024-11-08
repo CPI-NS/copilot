@@ -31,6 +31,7 @@ const PRINT_STATS = false
 var masterAddr *string = flag.String("maddr", "", "Master address. Defaults to localhost")
 var masterPort *int = flag.Int("mport", 7087, "Master port.  Defaults to 7077.")
 var reqsNb *int = flag.Int("q", 5000, "Total number of requests. Defaults to 5000.")
+//var reqsNb *int = flag.Int("q", 50000, "Total number of requests. Defaults to 5000.")
 var writes *int = flag.Int("w", 100, "Percentage of updates (writes). Defaults to 100%.")
 var noLeader *bool = flag.Bool("e", false, "Egalitarian (no leader). Defaults to false.")
 var twoLeaders *bool = flag.Bool("twoLeaders", true, "Two leaders for slowdown tolerance. Defaults to false.")
@@ -739,9 +740,9 @@ func waitReplies(readers []*bufio.Reader, leader int, n int, done chan Response,
 				//done <- &Response{OpId: reply.CommandId, rcvingTime: time.Now()}
 				//done <- reply.CommandId
         done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
-				if expected == successful[leader] {
-					return
-				}
+				//if expected == successful[leader] {
+				//	return
+				//}
 			}
 			break
 		default:
@@ -802,9 +803,9 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 			if reply.OK != 0 {
 				successful[leader]++
 				done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
-				if expected == successful[leader] {
-					return
-				}
+				//if expected == successful[leader] {
+				//	return
+				//}
 			}
 			break
 
