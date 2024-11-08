@@ -126,7 +126,6 @@ func main() {
   EaaS.EaasRegister(DBInit, "db_init")
 
   StartClient()
-
   EaaS.EaasStartGRPC()
 //  result := make([]int32, 2)
 //  values := make([]int32, 2)

@@ -13,14 +13,17 @@ import (
 	"net/rpc"
 	"os"
 	"os/signal"
+	filepath2 "path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"sort"
 	"github.com/copilot/src/state"
+	"strconv"
 	"time"
   "github.com/EaaS"
 )
 
-const REQUEST_TIMEOUT = 10000 * time.Millisecond
+const REQUEST_TIMEOUT = 100 * time.Millisecond
 const GET_VIEW_TIMEOUT = 100 * time.Millisecond
 const GC_DEBUG_ENABLED = false
 const PRINT_STATS = false
@@ -93,23 +96,27 @@ type View struct {
 
 var throughputs []DataPoint
 
-/*
-  Variables taken out of main and made global for EAAS
-*/
+
+var tput_interval_in_sec time.Duration
+var lastThroughputTime time.Time
+var pilotErr, pilotErr1 error
+var lastGVSent0, lastGVSent1 time.Time
+var put []bool
+var karray []int64
+var viewChangeChan chan *View
 var views []*View
-var leader int 
-var leader2 int 
+var leader int
+var leader2 int
 var readers []*bufio.Reader
 var writers []*bufio.Writer
-var leaderReplyChan chan int32
+//var leaderReplyChan chan int32
+var leaderReplyChan chan Response
 var pilot0ReplyChan chan Response
-var viewChangeChan chan *View
-var reqsCount int64 = 0
+var reqsCount int64 
 var isRandomLeader bool
+var before_total  time.Time
+var readings chan *DataPoint
 var reqNum int = 0
-/*
-  End of variables put to global for EAAS
-*/
 
 func main() {
   EaaS.EaasInit()
@@ -117,24 +124,25 @@ func main() {
   EaaS.EaasRegister(Get, "get")
   EaaS.EaasRegister(DBTeardown, "db_teardown")
   EaaS.EaasRegister(DBInit, "db_init")
-  
+
   StartClient()
 
   EaaS.EaasStartGRPC()
- // result := make([]int32, 2)
- // values := make([]int32, 2)
- // values[0] = 92
- // Put(6, nil, values, 0)
- // Get(6, nil, 0, result)
- // fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
- // values[0] = 37
- // Put(7, nil, values, 0)
- // Get(7, nil, 0, result)
- // fmt.Println("Get Result for key 7: expected: 37, actual: ", result[0])
- // Get(6, nil, 0, result)
- // fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
+//  result := make([]int32, 2)
+//  values := make([]int32, 2)
+//  values[0] = 92
+//  fmt.Println("Calling Put")
+//  Put(6, nil, values, 0)
+//  fmt.Println("Calling Get")
+//  Get(6, nil, 0, result)
+//  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
+//  values[0] = 37
+//  Put(7, nil, values, 0)
+//  Get(7, nil, 0, result)
+//  fmt.Println("Get Result for key 7: expected: 37, actual: ", result[0])
+//  Get(6, nil, 0, result)
+//  fmt.Println("Get Result for key 6: expected: 92, actual: ", result[0])
 }
-
 
 func StartClient() {
 
@@ -166,6 +174,9 @@ func StartClient() {
 		clientId = uint32(*cid)
 	}
 
+	r := rand.New(rand.NewSource(int64(clientId)))
+	zipf := rand.NewZipf(r, *s, *v, *numKeys)
+
 	if *conflicts > 100 {
 		log.Fatalf("Conflicts percentage must be between 0 and 100.\n")
 	}
@@ -185,6 +196,44 @@ func StartClient() {
 	servers := make([]net.Conn, N)
 	readers = make([]*bufio.Reader, N)
 	writers = make([]*bufio.Writer, N)
+
+	//rarray := make([]int, *reqsNb)
+	put = make([]bool, *reqsNb)
+
+	karray = make([]int64, *reqsNb)
+	if *noLeader { /*epaxos*/
+		for i := 0; i < len(karray); i++ {
+
+			if *conflicts >= 0 {
+				r := rand.Intn(100)
+				if r < *conflicts {
+					karray[i] = 0
+				} else {
+					// karray[i] = int64(43 + i)
+					karray[i] = (int64(i) << 32) | int64(clientId)
+				}
+				r = rand.Intn(100)
+				if r < *writes {
+					put[i] = true
+				} else {
+					put[i] = false
+				}
+			} else {
+				karray[i] = int64(zipf.Uint64())
+			}
+		}
+	} else {
+		for i := 0; i < len(karray); i++ {
+			karray[i] = rand.Int63n(int64(*numKeys))
+
+			r := rand.Intn(100)
+			if r < *writes {
+				put[i] = true
+			} else {
+				put[i] = false
+			}
+		}
+	}
 
 	if *conflicts >= 0 {
 		fmt.Println("Uniform distribution")
@@ -215,6 +264,8 @@ func StartClient() {
 	}
 
 	time.Sleep(5 * time.Second)
+	/*registerClientIdSuccessful := waitRegisterClientIdReplies(readers, N)
+	fmt.Printf("Client Id Registration succeeds: %d out of %d\n", registerClientIdSuccessful, N)*/
 
 	successful = make([]int, N)
 	leader = -1
@@ -223,6 +274,8 @@ func StartClient() {
 	leader2 = -1
 
 	isRandomLeader = false
+
+	// views for two leaders
 
 	if *noLeader == false {
 
@@ -263,13 +316,31 @@ func StartClient() {
 		}
 	}
 
-	//var done chan bool
+	var done chan bool
+	tput_interval_in_sec = time.Duration(*tput_interval * 1e9)
+	if *verbose {
+		done = make(chan bool, 1)
+		readings = make(chan *DataPoint, 600)
+		go printer(readings, done)
+	}
 
-  pilot0ReplyChan = make(chan Response, *reqsNb)
-  viewChangeChan = make(chan *View, 100)
-  for i := 0; i < N; i++ {
-    go waitRepliesPilot(readers, i, pilot0ReplyChan, viewChangeChan, *reqsNb*2)
-  }
+
+	// with pre-specified leader, we know which reader to check reply
+	if !*twoLeaders {
+		leaderReplyChan = make(chan Response, *reqsNb)
+		if isRandomLeader {
+			go waitRepliesRandomLeader(readers, N, leaderReplyChan)
+		} else {
+			go waitReplies(readers, leader, *reqsNb, leaderReplyChan, *reqsNb)
+		}
+	} else {
+		// with another pre-specified leader, we need to check other reply channel, and another reader
+		pilot0ReplyChan = make(chan Response, *reqsNb)
+		viewChangeChan = make(chan *View, 100)
+		for i := 0; i < N; i++ {
+			go waitRepliesPilot(readers, i, pilot0ReplyChan, viewChangeChan, *reqsNb*2)
+		}
+	}
 }
 
 /* not applicable for copilot but EAAS still needs the function stub */
@@ -284,19 +355,27 @@ func DBInit(_ int, _ []int) int {
 
 /* Get(key, columns[], numColumns, results[]) */
 func Get(key int64, _ []int32, _ int, result []int32) int{
-    var pilotErr, pilotErr1 error
-    var lastGVSent0, lastGVSent1 time.Time
-    id := int32(reqNum)
-    reqNum += 1
+    i := reqNum
+		id := int32(i)
 		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: state.Key(key), V: 0}, time.Now().UnixNano()}
 
 		/* Prepare proposal */
-		dlog.Printf("Sending proposal %d\n", id)
+		fmt.Printf("Sending proposal %d\n", id)
+
+//		if put[i] {
+//			args.Command.Op = state.PUT
+//		} else {
+//			args.Command.Op = state.GET
+//		}
+//		args.Command.K = state.Key(karray[i])
+//		args.Command.V = state.Value(i)
+		//args.Timestamp = time.Now().UnixNano()
 
 		before := time.Now()
 		timestamps = append(timestamps, before)
 
 		repliedCmdId := int32(-1)
+		//var rcvingTime time.Time
 		var to *time.Timer
 		succeeded := false
 		if *twoLeaders {
@@ -305,6 +384,7 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
 				for i := 0; i < len(viewChangeChan); i++ {
 					newView := <-viewChangeChan
 					if newView.ViewId > views[newView.PilotId].ViewId {
+						fmt.Printf("New view info: pilotId %v,  ViewId %v, ReplicaId %v\n", newView.PilotId, newView.ViewId, newView.ReplicaId)
 						views[newView.PilotId].PilotId = newView.PilotId
 						views[newView.PilotId].ReplicaId = newView.ReplicaId
 						views[newView.PilotId].ViewId = newView.ViewId
@@ -380,151 +460,17 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
 					select {
 					case e := <-pilot0ReplyChan:
 						repliedCmdId = e.OpId
+						//rcvingTime = e.rcvingTime
 						if repliedCmdId == id {
 							to.Stop()
 							succeeded = true
 						}
-//            fmt.Println("Value in Get: ", e.Value)
+
             result[0] = int32(e.Value)
-
-//					case <-to.C:
-//						fmt.Printf("Client %v: TIMEOUT for GET() request %v\n", clientId, id)
-//						repliedCmdId = -1
-//						succeeded = false
-//						toFired = true
-
-					default:
-					}
-
-					if succeeded {
-						if *check {
-							rsp[id] = true
-						}
-						reqsCount++
-						break
-					} else if toFired {
-						break
-					}
-				} // end of foor loop waiting for result
-				// successfully get the response. continue with the next request
-				if succeeded {
-					break
-				} else if toFired {
-					continue
-				}
-			} // end of copilot
-		} 
-
-    return EaaS.EAAS_W_EC_SUCCESS
-}
-
-/* Put(key, columns[], values[], size) */
-func Put(key int64, _ []int32, values []int32, _ int) int {
-    var pilotErr, pilotErr1 error
-    var lastGVSent0, lastGVSent1 time.Time
-    id := int32(reqNum)
-    reqNum += 1
-		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: state.Key(key), V: state.Value(values[0])}, time.Now().UnixNano()}
-
-		/* Prepare proposal */
-		dlog.Printf("Sending proposal %d\n", id)
-
-		before := time.Now()
-		timestamps = append(timestamps, before)
-
-		repliedCmdId := int32(-1)
-		var to *time.Timer
-		succeeded := false
-		if *twoLeaders {
-			for {
-				// Check if there is newer view
-				for i := 0; i < len(viewChangeChan); i++ {
-					newView := <-viewChangeChan
-					if newView.ViewId > views[newView.PilotId].ViewId {
-						views[newView.PilotId].PilotId = newView.PilotId
-						views[newView.PilotId].ReplicaId = newView.ReplicaId
-						views[newView.PilotId].ViewId = newView.ViewId
-						views[newView.PilotId].Active = true
-					}
-				}
-
-				// get random server to ask about new view
-				serverId := rand.Intn(N)
-				if views[0].Active {
-					leader = int(views[0].ReplicaId)
-					pilotErr = nil
-					if leader >= 0 {
-						writers[leader].WriteByte(genericsmrproto.PROPOSE)
-						args.Marshal(writers[leader])
-						pilotErr = writers[leader].Flush()
-						if pilotErr != nil {
-							views[0].Active = false
-						} else {
-							succeeded = true
-						}
-					}
-				}
-				if !views[0].Active {
-					leader = -1
-					if lastGVSent0 == (time.Time{}) || time.Since(lastGVSent0) >= GET_VIEW_TIMEOUT {
-						for ; serverId == 0; serverId = rand.Intn(N) {
-						}
-						getViewArgs := &genericsmrproto.GetView{0}
-						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
-						getViewArgs.Marshal(writers[serverId])
-						writers[serverId].Flush()
-						lastGVSent0 = time.Now()
-					}
-				}
-
-				if views[1].Active {
-					leader2 = int(views[1].ReplicaId)
-					/* Send to second leader for two-leader protocol */
-					pilotErr1 = nil
-					if *twoLeaders && !*sendOnce && leader2 >= 0 {
-						writers[leader2].WriteByte(genericsmrproto.PROPOSE)
-						args.Marshal(writers[leader2])
-						pilotErr1 = writers[leader2].Flush()
-						if pilotErr1 != nil {
-							views[1].Active = false
-						} else {
-							succeeded = true
-						}
-					}
-				}
-				if !views[1].Active {
-					leader2 = -1
-					if lastGVSent1 == (time.Time{}) || time.Since(lastGVSent1) >= GET_VIEW_TIMEOUT {
-						for ; serverId == 1; serverId = rand.Intn(N) {
-						}
-						getViewArgs := &genericsmrproto.GetView{1}
-						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
-						getViewArgs.Marshal(writers[serverId])
-						writers[serverId].Flush()
-						lastGVSent1 = time.Now()
-					}
-				}
-				if !succeeded {
-					continue
-				}
-
-				// we successfully sent to at least one pilot
-				succeeded = false
-				to = time.NewTimer(REQUEST_TIMEOUT)
-				toFired := false
-				for true {
-					select {
-					case e := <-pilot0ReplyChan:
-						repliedCmdId = e.OpId
-						if repliedCmdId == id {
-							to.Stop()
-							succeeded = true
-						}
-//            fmt.Println("Value in Put ", e.Value)
-
 					case <-to.C:
-						fmt.Printf("Client %v: TIMEOUT for PUT() request %v\n", clientId, id)
+						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
 						repliedCmdId = -1
+						//rcvingTime = time.Now()
 						succeeded = false
 						toFired = true
 
@@ -540,6 +486,14 @@ func Put(key int64, _ []int32, values []int32, _ int) int {
 					} else if toFired {
 						break
 					}
+
+				//	if repliedCmdId != -1 && repliedCmdId < id {
+						// update latency if this response actually arrived ealier
+						//newLat := int64(rcvingTime.Sub(timestamps[repliedCmdId]) / time.Microsecond)
+						//if newLat < latencies[repliedCmdId] {
+						//	latencies[repliedCmdId] = newLat
+						//}
+				//	}
 				} // end of foor loop waiting for result
 				// successfully get the response. continue with the next request
 				if succeeded {
@@ -548,9 +502,284 @@ func Put(key int64, _ []int32, values []int32, _ int) int {
 					continue
 				}
 			} // end of copilot
-		} 
+		} else {
+			if isRandomLeader { /*epaxos with random leader*/
+				leader = i % N
+			} else if *noLeader == false { /*MultiPaxos*/
+				leader = 0
+			}
+			if leader >= 0 {
+				writers[leader].WriteByte(genericsmrproto.PROPOSE)
+				args.Marshal(writers[leader])
+				writers[leader].Flush()
+			}
+			to = time.NewTimer(REQUEST_TIMEOUT)
+			for true {
+				select {
+				case e := <-leaderReplyChan:
+					repliedCmdId = e.OpId
+					//rcvingTime = time.Now()
+          result[0] = int32(e.Value)
+				default:
+				}
 
-    return 0
+				if repliedCmdId == id {
+					if *check {
+						rsp[id] = true
+					}
+					reqsCount++
+					break
+				}
+			}
+		}
+
+    reqNum+=1
+    return EaaS.EAAS_W_EC_SUCCESS
+}
+
+/* Put(key, columns[], values[], size) */
+func Put(key int64, _ []int32, values []int32, _ int) int {
+    i := reqNum
+		id := int32(i)
+		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: state.Key(key), V: state.Value(values[0])}, time.Now().UnixNano()}
+
+		/* Prepare proposal */
+		fmt.Printf("Sending proposal %d\n", id)
+
+//		if put[i] {
+//			args.Command.Op = state.PUT
+//		} else {
+//			args.Command.Op = state.GET
+//		}
+//		args.Command.K = state.Key(karray[i])
+//		args.Command.V = state.Value(i)
+		//args.Timestamp = time.Now().UnixNano()
+
+		before := time.Now()
+		timestamps = append(timestamps, before)
+
+		repliedCmdId := int32(-1)
+		//var rcvingTime time.Time
+		var to *time.Timer
+		succeeded := false
+		if *twoLeaders {
+			for {
+				// Check if there is newer view
+				for i := 0; i < len(viewChangeChan); i++ {
+					newView := <-viewChangeChan
+					if newView.ViewId > views[newView.PilotId].ViewId {
+						fmt.Printf("New view info: pilotId %v,  ViewId %v, ReplicaId %v\n", newView.PilotId, newView.ViewId, newView.ReplicaId)
+						views[newView.PilotId].PilotId = newView.PilotId
+						views[newView.PilotId].ReplicaId = newView.ReplicaId
+						views[newView.PilotId].ViewId = newView.ViewId
+						views[newView.PilotId].Active = true
+					}
+				}
+
+				// get random server to ask about new view
+				serverId := rand.Intn(N)
+				if views[0].Active {
+					leader = int(views[0].ReplicaId)
+					pilotErr = nil
+					if leader >= 0 {
+						writers[leader].WriteByte(genericsmrproto.PROPOSE)
+						args.Marshal(writers[leader])
+						pilotErr = writers[leader].Flush()
+						if pilotErr != nil {
+							views[0].Active = false
+						} else {
+							succeeded = true
+						}
+					}
+				}
+				if !views[0].Active {
+					leader = -1
+					if lastGVSent0 == (time.Time{}) || time.Since(lastGVSent0) >= GET_VIEW_TIMEOUT {
+						for ; serverId == 0; serverId = rand.Intn(N) {
+						}
+						getViewArgs := &genericsmrproto.GetView{0}
+						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
+						getViewArgs.Marshal(writers[serverId])
+						writers[serverId].Flush()
+						lastGVSent0 = time.Now()
+					}
+				}
+
+				if views[1].Active {
+					leader2 = int(views[1].ReplicaId)
+					/* Send to second leader for two-leader protocol */
+					pilotErr1 = nil
+					if *twoLeaders && !*sendOnce && leader2 >= 0 {
+						writers[leader2].WriteByte(genericsmrproto.PROPOSE)
+						args.Marshal(writers[leader2])
+						pilotErr1 = writers[leader2].Flush()
+						if pilotErr1 != nil {
+							views[1].Active = false
+						} else {
+							succeeded = true
+						}
+					}
+				}
+				if !views[1].Active {
+					leader2 = -1
+					if lastGVSent1 == (time.Time{}) || time.Since(lastGVSent1) >= GET_VIEW_TIMEOUT {
+						for ; serverId == 1; serverId = rand.Intn(N) {
+						}
+						getViewArgs := &genericsmrproto.GetView{1}
+						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
+						getViewArgs.Marshal(writers[serverId])
+						writers[serverId].Flush()
+						lastGVSent1 = time.Now()
+					}
+				}
+				if !succeeded {
+					continue
+				}
+
+				// we successfully sent to at least one pilot
+				succeeded = false
+				to = time.NewTimer(REQUEST_TIMEOUT)
+				toFired := false
+				for true {
+					select {
+					case e := <-pilot0ReplyChan:
+						repliedCmdId = e.OpId
+						//rcvingTime = e.rcvingTime
+						if repliedCmdId == id {
+							to.Stop()
+							succeeded = true
+						}
+
+					case <-to.C:
+						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
+						repliedCmdId = -1
+						//rcvingTime = time.Now()
+						succeeded = false
+						toFired = true
+
+					default:
+					}
+
+					if succeeded {
+						if *check {
+							rsp[id] = true
+						}
+						reqsCount++
+						break
+					} else if toFired {
+						break
+					}
+
+					if repliedCmdId != -1 && repliedCmdId < id {
+						// update latency if this response actually arrived ealier
+						//newLat := int64(rcvingTime.Sub(timestamps[repliedCmdId]) / time.Microsecond)
+						//if newLat < latencies[repliedCmdId] {
+						//	latencies[repliedCmdId] = newLat
+						//}
+					}
+				} // end of foor loop waiting for result
+				// successfully get the response. continue with the next request
+				if succeeded {
+					break
+				} else if toFired {
+					continue
+				}
+			} // end of copilot
+		} else {
+			if isRandomLeader { /*epaxos with random leader*/
+				leader = i % N
+			} else if *noLeader == false { /*MultiPaxos*/
+				leader = 0
+			}
+			if leader >= 0 {
+				writers[leader].WriteByte(genericsmrproto.PROPOSE)
+				args.Marshal(writers[leader])
+				writers[leader].Flush()
+			}
+			to = time.NewTimer(REQUEST_TIMEOUT)
+			for true {
+				select {
+				case e := <-leaderReplyChan:
+					repliedCmdId = e.OpId
+					//rcvingTime = time.Now()
+				default:
+				}
+
+				if repliedCmdId == id {
+					if *check {
+						rsp[id] = true
+					}
+					reqsCount++
+					break
+				}
+			}
+		}
+    reqNum+=1
+    return EaaS.EAAS_W_EC_SUCCESS
+}
+
+func waitReplies(readers []*bufio.Reader, leader int, n int, done chan Response, expected int) {
+  fmt.Println("Not Random Leader")
+	var msgType byte
+	var err error
+	reply := new(genericsmrproto.ProposeReplyTS)
+
+	for true {
+		if msgType, err = readers[leader].ReadByte(); err != nil {
+			break
+		}
+
+		switch msgType {
+		case genericsmrproto.PROPOSE_REPLY:
+			if err = reply.Unmarshal(readers[leader]); err != nil {
+				break
+			}
+			if reply.OK != 0 {
+				successful[leader]++
+				//done <- &Response{OpId: reply.CommandId, rcvingTime: time.Now()}
+				//done <- reply.CommandId
+        done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
+				if expected == successful[leader] {
+					return
+				}
+			}
+			break
+		default:
+			break
+		}
+	}
+}
+
+//func waitRepliesRandomLeader(readers []*bufio.Reader, n int, done chan int32) {
+func waitRepliesRandomLeader(readers []*bufio.Reader, n int, done chan Response) {
+  fmt.Println("Random Leader")
+	var msgType byte
+	var err error
+	reply := new(genericsmrproto.ProposeReplyTS)
+
+	for true {
+		for i := 0; i < n; i++ {
+			if msgType, err = readers[i].ReadByte(); err != nil {
+				continue
+			}
+
+			switch msgType {
+			case genericsmrproto.PROPOSE_REPLY:
+				if err = reply.Unmarshal(readers[i]); err != nil {
+					continue
+				}
+				if reply.OK != 0 {
+					successful[i]++
+					//done <- &Response{OpId: reply.CommandId, rcvingTime: time.Now()}
+          done <- Response{reply.CommandId, time.Now(), reply.Timestamp, reply.Value}
+					//done <- reply.CommandId
+				}
+				break
+			default:
+				break
+			}
+		}
+	}
 }
 
 func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, viewChangeChan chan *View, expected int) {
@@ -595,6 +824,33 @@ func waitRepliesPilot(readers []*bufio.Reader, leader int, done chan Response, v
 
 }
 
+func waitRegisterClientIdReplies(readers []*bufio.Reader, n int) int {
+
+	if n > len(readers) {
+		return -1
+	}
+
+	success := 0
+	reply := new(genericsmrproto.RegisterClientIdReply)
+	for i := 0; i < n; i++ {
+		i := 0
+		//for success < n {
+		if err := reply.Unmarshal(readers[i]); err != nil {
+			fmt.Println("Error when reading RegisterClientIdReply from replica", i, ":", err)
+			i = (i + 1) % n
+			continue
+		}
+		if reply.OK != 0 {
+			success++
+		}
+
+		i = (i + 1) % n
+	}
+
+	return success
+
+}
+
 func generateRandomClientId() uint32 {
 	s := rand.NewSource(time.Now().UnixNano())
 	r := rand.New(s)
@@ -623,13 +879,106 @@ func printer(dataChan chan *DataPoint, done chan bool) {
 
 }
 
+/* Trim and sort the latencies */
+func processLatencies(latencies []int64) []int64 {
 
+	if len(latencies) <= 0 {
+		return latencies
+	}
+	trimLength := int(float64(len(latencies)) * *trim)
+	latencies = latencies[trimLength : len(latencies)-trimLength]
+	sort.Sort(int64Slice(latencies))
+
+	return latencies
+}
+
+func getLatencyPercentiles(latencies []int64, shouldTrim bool) []int64 {
+	if shouldTrim {
+		latencies = processLatencies(latencies)
+	}
+
+	percentiles := make([]int64, 0, 100)
+	l := len(latencies)
+	if l == 0 {
+		return percentiles
+	}
+
+	for i := 1; i < 100; i++ {
+		idx := int(float64(l) * float64(i) / 100.0)
+		percentiles = append(percentiles, latencies[idx])
+	}
+	// add 99.9 percentile
+	percentiles = append(percentiles, latencies[int(float64(l)*0.999)])
+	return percentiles
+}
+
+func processAndPrintThroughputs(throughputs []DataPoint) (error, string) {
+	var overallTput string = "NaN"
+	var instTput string = "NaN"
+
+	filename := fmt.Sprintf("client-%d.throughput.txt", clientId)
+	filepath := filepath2.Join(*prefix, filename)
+	f, err := os.Create(filepath)
+
+	if err != nil {
+		return err, overallTput
+	}
+
+	defer f.Close()
+
+	for i, p := range throughputs {
+		overallTput = "NaN"
+		instTput = "NaN"
+		if p.elapse > time.Duration(0) {
+			overallTput = strconv.FormatInt(int64(float64(p.reqsCount)*float64(time.Second)/float64(p.elapse)), 10)
+
+		}
+
+		if i == 0 {
+			instTput = strconv.FormatInt(p.reqsCount, 10)
+		} else if p.elapse > throughputs[i-1].elapse {
+			instTput = strconv.FormatInt(int64(
+				float64(p.reqsCount-throughputs[i-1].reqsCount)*float64(time.Second)/
+					float64(p.elapse-throughputs[i-1].elapse)), 10)
+		}
+		line := fmt.Sprintf("%.1f\t%d\t%v\t%v\t%.1f\n", float64(p.elapse)/float64(time.Second), p.reqsCount, overallTput, instTput, float64(p.t.UnixNano())*float64(time.Nanosecond)/float64(time.Second))
+		_, err = f.WriteString(line)
+		fmt.Printf(line)
+	}
+
+	// Trimming
+	trimmedOverallTput := "NaN"
+	trimLength := int(float64(len(throughputs)) * *trim)
+	throughputs = throughputs[trimLength : len(throughputs)-trimLength]
+	newlen := len(throughputs)
+	if newlen == 1 {
+		trimmedOverallTput = strconv.FormatInt(int64(
+			float64(throughputs[0].reqsCount)*float64(time.Second)/float64(throughputs[0].elapse)), 10)
+	} else if newlen > 1 && throughputs[newlen-1].elapse > throughputs[0].elapse {
+		trimmedOverallTput = strconv.FormatInt(int64(
+			float64(throughputs[newlen-1].reqsCount-throughputs[0].reqsCount)*float64(time.Second)/
+				float64(throughputs[newlen-1].elapse-throughputs[0].elapse)), 10)
+	}
+
+	fmt.Printf("%s\n", overallTput)
+	fmt.Printf("%s\n", trimmedOverallTput)
+
+	_, err = f.WriteString(fmt.Sprintf("%s\n", overallTput))
+	_, err = f.WriteString(fmt.Sprintf("%s\n", trimmedOverallTput))
+
+	f.Sync()
+
+	return err, trimmedOverallTput
+
+}
 
 func catchKill(interrupt chan os.Signal) {
 	<-interrupt
 	if *cpuProfile != "" {
 		pprof.StopCPUProfile()
 	}
+	//fmt.Println(processLatencies(latencies))
+	writeLatenciesToFile(latencies, "")
 	dlog.Printf("Caught signal and stopped CPU profile before exit.\n")
 	os.Exit(0)
 }
@@ -641,14 +990,158 @@ func checkError(e error) {
 	}
 }
 
+func writeLatenciesToFile(latencies []int64, latencyType string) {
+
+	// trimmedLatencies: trimmed and sorted
+	trimmedLatencies := processLatencies(latencies)
+	filename := fmt.Sprintf("client-%d.%slatency.all.txt", clientId, latencyType)
+	filepath := filepath2.Join(*prefix, filename)
+	writeSliceToFile(filepath, trimmedLatencies)
+
+	filename = fmt.Sprintf("client-%d.%slatency.percentiles.txt", clientId, latencyType)
+	filepath = filepath2.Join(*prefix, filename)
+	writeSliceToFile(filepath, getLatencyPercentiles(trimmedLatencies, false))
+}
+
+// return the percentiles
+func writeLatenciesToFile2(latencies []int64, latencyType string) []int64 {
+
+	// original latencies
+	filename := fmt.Sprintf("client-%d.%slatency.orig.txt", clientId, latencyType)
+	filepath := filepath2.Join(*prefix, filename)
+	writeSliceToFile(filepath, latencies)
+
+	// trimmedLatencies: trimmed and sorted
+	trimmedLatencies := processLatencies(latencies)
+	filename = fmt.Sprintf("client-%d.%slatency.all.txt", clientId, latencyType)
+	filepath = filepath2.Join(*prefix, filename)
+	writeSliceToFile(filepath, trimmedLatencies)
+
+	percentiles := getLatencyPercentiles(trimmedLatencies, false)
+	filename = fmt.Sprintf("client-%d.%slatency.percentiles.txt", clientId, latencyType)
+	filepath = filepath2.Join(*prefix, filename)
+	writeSliceToFile(filepath, percentiles)
+
+	return percentiles
+}
+
+func writeThroughputLatency(throughput string, latencies []int64, latencyType string) error {
+
+	if len(latencies) < 100 {
+		return nil
+	}
+
+	filename := fmt.Sprintf("client-%d.tput%slat.txt", clientId, latencyType)
+	filepath := filepath2.Join(*prefix, filename)
+	f, err := os.Create(filepath)
+
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+
+	text := fmt.Sprintf("%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", throughput, latencies[0], latencies[24],
+		latencies[49], latencies[74], latencies[89], latencies[94], latencies[98], latencies[99])
+	_, err = f.WriteString(text)
+
+	if err != nil {
+		return err
+	}
+
+	return f.Sync()
+}
+
+func writeSliceToFile(filename string, arr []int64) error {
+	f, err := os.Create(filename)
+
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+	//w := bufio.NewWriter(f)
+
+	for _, val := range arr {
+
+		//_, err := w.WriteString(string(val) + "\n")
+		text := fmt.Sprintf("%v\n", val)
+		_, err := f.WriteString(text)
+		//_, err := io.WriteString(f,  text)
+
+		if err != nil {
+			return err
+		}
+	}
+	//w.Flush()
+	return f.Sync()
+
+}
+
+func writeTimestampsToFile(arr []time.Time, latencies []int64) error {
+
+	filename := fmt.Sprintf("client-%d.timestamps.orig.txt", clientId)
+	filepath := filepath2.Join(*prefix, filename)
+
+	f, err := os.Create(filepath)
+
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+
+	var n int
+	if len(arr) < len(latencies) {
+		n = len(arr)
+	} else {
+		n = len(latencies)
+	}
+	for i := 0; i < n; i++ {
+
+		val := arr[i]
+		text := fmt.Sprintf("%02d:%02d:%02d.%v\t%v\n", val.Hour(), val.Minute(), val.Second(), val.Nanosecond(), latencies[i])
+		_, err := f.WriteString(text)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return f.Sync()
+
+}
 
 func shutdownHook(c chan os.Signal) {
 	sig := <-c
 	fmt.Printf("I've got killed by signal %s! Cleaning up...", sig)
 
+	///* Output latencies */
+	//writeLatenciesToFile(latencies, "")
+	//
+	///* Output throughputs */
+	//processAndPrintThroughputs(throughputs)
+	writeDataToFiles()
 	os.Exit(1)
 }
 
+func writeDataToFiles() {
+
+	/* Output timestamp */
+	writeTimestampsToFile(timestamps, latencies)
+
+	/* Output throughputs */
+	_, throughput := processAndPrintThroughputs(throughputs)
+
+	/* Output latencies */
+	percentiles := writeLatenciesToFile2(latencies, "")
+	writeThroughputLatency(throughput, percentiles, "")
+
+	/* Output read/write latencies */
+	// writeLatenciesToFile2(readlatencies, "read")
+	// writeLatenciesToFile2(writelatencies, "write")
+
+}
 
 /* Helper interface for sorting int64 */
 type int64Slice []int64
