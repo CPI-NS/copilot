@@ -6,7 +6,7 @@
 
 
 # use .all to get a list of nodes
-all_nodes_addrs=($(echo "@.all.host@" | tr ':' ' '))
+all_nodes_addrs=($(echo "@.all.host@" | tr ',' ' '))
 
 
 # -1 for the master
