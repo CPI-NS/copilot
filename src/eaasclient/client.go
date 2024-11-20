@@ -360,9 +360,6 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
 		id := int32(i)
 		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.GET, K: state.Key(key), V: 0}, time.Now().UnixNano()}
 
-		/* Prepare proposal */
-		fmt.Printf("Sending proposal %d\n", id)
-
 //		if put[i] {
 //			args.Command.Op = state.PUT
 //		} else {

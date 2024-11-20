@@ -74,7 +74,9 @@ func (master *Master) run() {
 		master.nodes[i], err = rpc.DialHTTP("tcp", addr)
 		if err != nil {
 			log.Fatalf("Error connecting to replica %d\n", i)
-		}
+		}else {
+      fmt.Println("Connected to replica ", i , " at ", master.addrList[i])
+    }
 		master.leader[i] = false
 	}
 	master.leader[0] = true
