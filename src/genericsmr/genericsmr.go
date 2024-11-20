@@ -213,8 +213,15 @@ func (r *Replica) waitForPeerConnections(done chan bool) {
 	var b [4]byte
 	bs := b[:4]
 
-	r.Listener, _ = net.Listen("tcp", r.PeerAddrList[r.Id])
+  var err error
+  port := r.PeerAddrList[r.Id][len(r.PeerAddrList[r.Id])-4:]
+  fmt.Println("Node Port: ", port)
+  r.Listener, err = net.Listen("tcp", fmt.Sprintf(":%s",port))
+  if err != nil {
+    fmt.Println("Listen Error on ", r.PeerAddrList[r.Id], " ", err)
+  }
 	for i := r.Id + 1; i < int32(r.N); i++ {
+    fmt.Println("Attempting to connect to  ", r.PeerAddrList[r.Id]) 
 		conn, err := r.Listener.Accept()
 		if err != nil {
 			fmt.Println("Accept error:", err)
@@ -229,6 +236,7 @@ func (r *Replica) waitForPeerConnections(done chan bool) {
 		r.PeerReaders[id] = bufio.NewReader(conn)
 		r.PeerWriters[id] = bufio.NewWriter(conn)
 		r.Alive[id] = true
+    fmt.Println("Conneted to peer ", r.PeerAddrList[r.Id]) 
 	}
 
 	done <- true
