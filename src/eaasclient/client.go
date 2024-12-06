@@ -121,10 +121,13 @@ var reqNum int = 0
 
 func main() {
   EaaS.EaasInit()
-  EaaS.EaasRegister(Put, "put")
+  EaaS.EaasRegister(batchPut, "batch_put")
   EaaS.EaasRegister(Get, "get")
-  EaaS.EaasRegister(DBTeardown, "db_teardown")
-  EaaS.EaasRegister(DBInit, "db_init")
+  EaaS.EaasRegister(Set, "set")
+  EaaS.EaasRegister(dbInit, "db_init")
+  EaaS.EaasRegister(beginTx, "begin_tx")
+  EaaS.EaasRegister(commitTx, "commit_tx")
+  EaaS.EaasRegister(rollbackTx, "rollback_tx")
 
   StartClient()
 
@@ -344,13 +347,24 @@ func StartClient() {
 	}
 }
 
-/* not applicable for copilot but EAAS still needs the function stub */
-func DBTeardown() int {
+
+func Set(_ int64, _ []int32) int {
   return EaaS.EAAS_W_EC_SUCCESS
 }
 
-/* not applicable for copilot but EAAS still needs the function stub */
-func DBInit(_ int, _ []int) int {
+func dbInit(_ int) int {
+  return EaaS.EAAS_W_EC_SUCCESS
+}
+
+func beginTx() int {
+  return EaaS.EAAS_W_EC_SUCCESS
+}
+
+func commitTx() int {
+  return EaaS.EAAS_W_EC_SUCCESS
+}
+
+func rollbackTx() int {
   return EaaS.EAAS_W_EC_SUCCESS
 }
 
@@ -535,184 +549,227 @@ func Get(key int64, _ []int32, _ int, result []int32) int{
     return EaaS.EAAS_W_EC_SUCCESS
 }
 
-/* Put(key, columns[], values[], size) */
-func Put(key int64, _ []int32, values []int32, _ int) int {
+//func Put(key int64, _ []int32, values []int32, _ int) int {
+func batchPut(keys []int64, _ []int32, values[]int32, _ int, batch_size int) int { 
     i := reqNum
 		id := int32(i)
-		args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: state.Key(key), V: state.Value(values[0])}, time.Now().UnixNano()}
 
-		/* Prepare proposal */
-		fmt.Printf("Sending proposal %d\n", id)
+    for  i, _ := range keys {
+      args := genericsmrproto.Propose{id, state.Command{ClientId: clientId, OpId: id, Op: state.PUT, K: state.Key(keys[i]), V: state.Value(values[0])}, time.Now().UnixNano()}
 
-//		if put[i] {
-//			args.Command.Op = state.PUT
-//		} else {
-//			args.Command.Op = state.GET
-//		}
-//		args.Command.K = state.Key(karray[i])
-//		args.Command.V = state.Value(i)
-		//args.Timestamp = time.Now().UnixNano()
+      before := time.Now()
+      timestamps = append(timestamps, before)
 
-		before := time.Now()
-		timestamps = append(timestamps, before)
+      repliedCmdId := int32(-1)
+      //var rcvingTime time.Time
+      //var to *time.Timer
+      succeeded := false
+      if *twoLeaders {
+        for {
+          // Check if there is newer view
+          for i := 0; i < len(viewChangeChan); i++ {
+            newView := <-viewChangeChan
+            if newView.ViewId > views[newView.PilotId].ViewId {
+              fmt.Printf("New view info: pilotId %v,  ViewId %v, ReplicaId %v\n", newView.PilotId, newView.ViewId, newView.ReplicaId)
+              views[newView.PilotId].PilotId = newView.PilotId
+              views[newView.PilotId].ReplicaId = newView.ReplicaId
+              views[newView.PilotId].ViewId = newView.ViewId
+              views[newView.PilotId].Active = true
+            }
+          }
 
-		repliedCmdId := int32(-1)
-		//var rcvingTime time.Time
-		var to *time.Timer
-		succeeded := false
-		if *twoLeaders {
-			for {
-				// Check if there is newer view
-				for i := 0; i < len(viewChangeChan); i++ {
-					newView := <-viewChangeChan
-					if newView.ViewId > views[newView.PilotId].ViewId {
-						fmt.Printf("New view info: pilotId %v,  ViewId %v, ReplicaId %v\n", newView.PilotId, newView.ViewId, newView.ReplicaId)
-						views[newView.PilotId].PilotId = newView.PilotId
-						views[newView.PilotId].ReplicaId = newView.ReplicaId
-						views[newView.PilotId].ViewId = newView.ViewId
-						views[newView.PilotId].Active = true
-					}
-				}
+          // get random server to ask about new view
+          serverId := rand.Intn(N)
+          if views[0].Active {
+            leader = int(views[0].ReplicaId)
+            pilotErr = nil
+            if leader >= 0 {
+              writers[leader].WriteByte(genericsmrproto.PROPOSE)
+              args.Marshal(writers[leader])
+             // pilotErr = writers[leader].Flush()
+             // if pilotErr != nil {
+             //   views[0].Active = false
+             // } else {
+             //   succeeded = true
+             // }
+            }
+          }
+          if !views[0].Active {
+            leader = -1
+            if lastGVSent0 == (time.Time{}) || time.Since(lastGVSent0) >= GET_VIEW_TIMEOUT {
+              for ; serverId == 0; serverId = rand.Intn(N) {
+              }
+              getViewArgs := &genericsmrproto.GetView{0}
+              writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
+              getViewArgs.Marshal(writers[serverId])
+              //writers[serverId].Flush()
+              lastGVSent0 = time.Now()
+            }
+          }
 
-				// get random server to ask about new view
-				serverId := rand.Intn(N)
-				if views[0].Active {
-					leader = int(views[0].ReplicaId)
-					pilotErr = nil
-					if leader >= 0 {
-						writers[leader].WriteByte(genericsmrproto.PROPOSE)
-						args.Marshal(writers[leader])
-						pilotErr = writers[leader].Flush()
-						if pilotErr != nil {
-							views[0].Active = false
-						} else {
-							succeeded = true
-						}
-					}
-				}
-				if !views[0].Active {
-					leader = -1
-					if lastGVSent0 == (time.Time{}) || time.Since(lastGVSent0) >= GET_VIEW_TIMEOUT {
-						for ; serverId == 0; serverId = rand.Intn(N) {
-						}
-						getViewArgs := &genericsmrproto.GetView{0}
-						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
-						getViewArgs.Marshal(writers[serverId])
-						writers[serverId].Flush()
-						lastGVSent0 = time.Now()
-					}
-				}
+          if views[1].Active {
+            leader2 = int(views[1].ReplicaId)
+            /* Send to second leader for two-leader protocol */
+            pilotErr1 = nil
+            if *twoLeaders && !*sendOnce && leader2 >= 0 {
+              writers[leader2].WriteByte(genericsmrproto.PROPOSE)
+              args.Marshal(writers[leader2])
+              //pilotErr1 = writers[leader2].Flush()
+              if pilotErr1 != nil {
+                views[1].Active = false
+              } else {
+                succeeded = true
+              }
+            }
+          }
+          if !views[1].Active {
+            leader2 = -1
+            if lastGVSent1 == (time.Time{}) || time.Since(lastGVSent1) >= GET_VIEW_TIMEOUT {
+              for ; serverId == 1; serverId = rand.Intn(N) {
+              }
+              getViewArgs := &genericsmrproto.GetView{1}
+              writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
+              getViewArgs.Marshal(writers[serverId])
+    //          writers[serverId].Flush()
+              lastGVSent1 = time.Now()
+            }
+          }
+          if !succeeded {
+            continue
+          }
 
-				if views[1].Active {
-					leader2 = int(views[1].ReplicaId)
-					/* Send to second leader for two-leader protocol */
-					pilotErr1 = nil
-					if *twoLeaders && !*sendOnce && leader2 >= 0 {
-						writers[leader2].WriteByte(genericsmrproto.PROPOSE)
-						args.Marshal(writers[leader2])
-						pilotErr1 = writers[leader2].Flush()
-						if pilotErr1 != nil {
-							views[1].Active = false
-						} else {
-							succeeded = true
-						}
-					}
-				}
-				if !views[1].Active {
-					leader2 = -1
-					if lastGVSent1 == (time.Time{}) || time.Since(lastGVSent1) >= GET_VIEW_TIMEOUT {
-						for ; serverId == 1; serverId = rand.Intn(N) {
-						}
-						getViewArgs := &genericsmrproto.GetView{1}
-						writers[serverId].WriteByte(genericsmrproto.GET_VIEW)
-						getViewArgs.Marshal(writers[serverId])
-						writers[serverId].Flush()
-						lastGVSent1 = time.Now()
-					}
-				}
-				if !succeeded {
-					continue
-				}
+          // we successfully sent to at least one pilot
+         // succeeded = false
+         // to = time.NewTimer(REQUEST_TIMEOUT)
+         // toFired := false
+         // for true {
+         //   select {
+         //   case e := <-pilot0ReplyChan:
+         //     repliedCmdId = e.OpId
+         //     //rcvingTime = e.rcvingTime
+         //     if repliedCmdId == id {
+         //       to.Stop()
+         //       succeeded = true
+         //     }
 
-				// we successfully sent to at least one pilot
-				succeeded = false
-				to = time.NewTimer(REQUEST_TIMEOUT)
-				toFired := false
-				for true {
-					select {
-					case e := <-pilot0ReplyChan:
-						repliedCmdId = e.OpId
-						//rcvingTime = e.rcvingTime
-						if repliedCmdId == id {
-							to.Stop()
-							succeeded = true
-						}
+         //   case <-to.C:
+         //     fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
+         //     repliedCmdId = -1
+         //     //rcvingTime = time.Now()
+         //     succeeded = false
+         //     toFired = true
 
-					case <-to.C:
-						fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
-						repliedCmdId = -1
-						//rcvingTime = time.Now()
-						succeeded = false
-						toFired = true
+         //   default:
+         //   }
 
-					default:
-					}
+         //   if succeeded {
+         //     if *check {
+         //       rsp[id] = true
+         //     }
+         //     reqsCount++
+         //     break
+         //   } else if toFired {
+         //     break
+         //   }
 
-					if succeeded {
-						if *check {
-							rsp[id] = true
-						}
-						reqsCount++
-						break
-					} else if toFired {
-						break
-					}
+         //   if repliedCmdId != -1 && repliedCmdId < id {
+         //     // update latency if this response actually arrived ealier
+         //     //newLat := int64(rcvingTime.Sub(timestamps[repliedCmdId]) / time.Microsecond)
+         //     //if newLat < latencies[repliedCmdId] {
+         //     //	latencies[repliedCmdId] = newLat
+         //     //}
+         //   }
+         // } // end of foor loop waiting for result
+         // // successfully get the response. continue with the next request
+         // if succeeded {
+         //   break
+         // } else if toFired {
+         //   continue
+         // }
+        } // end of copilot
+      } else {
+        if isRandomLeader { /*epaxos with random leader*/
+          leader = i % N
+        } else if *noLeader == false { /*MultiPaxos*/
+          leader = 0
+        }
+        if leader >= 0 {
+          writers[leader].WriteByte(genericsmrproto.PROPOSE)
+          args.Marshal(writers[leader])
+     //     writers[leader].Flush()
+        }
+        for true {
+          select {
+          case e := <-leaderReplyChan:
+            repliedCmdId = e.OpId
+            //rcvingTime = time.Now()
+          default:
+          }
 
-					if repliedCmdId != -1 && repliedCmdId < id {
-						// update latency if this response actually arrived ealier
-						//newLat := int64(rcvingTime.Sub(timestamps[repliedCmdId]) / time.Microsecond)
-						//if newLat < latencies[repliedCmdId] {
-						//	latencies[repliedCmdId] = newLat
-						//}
-					}
-				} // end of foor loop waiting for result
-				// successfully get the response. continue with the next request
-				if succeeded {
-					break
-				} else if toFired {
-					continue
-				}
-			} // end of copilot
-		} else {
-			if isRandomLeader { /*epaxos with random leader*/
-				leader = i % N
-			} else if *noLeader == false { /*MultiPaxos*/
-				leader = 0
-			}
-			if leader >= 0 {
-				writers[leader].WriteByte(genericsmrproto.PROPOSE)
-				args.Marshal(writers[leader])
-				writers[leader].Flush()
-			}
-			to = time.NewTimer(REQUEST_TIMEOUT)
-			for true {
-				select {
-				case e := <-leaderReplyChan:
-					repliedCmdId = e.OpId
-					//rcvingTime = time.Now()
-				default:
-				}
+          if repliedCmdId == id {
+            if *check {
+              rsp[id] = true
+            }
+            reqsCount++
+            break
+          }
+        }
+      }
+      reqNum+=1
+    }
 
-				if repliedCmdId == id {
-					if *check {
-						rsp[id] = true
-					}
-					reqsCount++
-					break
-				}
-			}
-		}
-    reqNum+=1
+    for i := 0; i < N; i++ {
+      writers[i].Flush()
+    }
+
+    succeeded := false
+    to := time.NewTimer(REQUEST_TIMEOUT)
+    toFired := false
+    numReplies := 0
+    for true {
+      select {
+        case e := <-pilot0ReplyChan:
+          repliedCmdId := e.OpId
+          //rcvingTime = e.rcvingTime
+          if repliedCmdId == id {
+            to.Stop()
+            succeeded = true
+          }
+          numReplies++
+          fmt.Println("Got reply: ", numReplies)
+          if numReplies == batch_size {
+            break
+          }
+
+        case <-to.C:
+          fmt.Printf("Client %v: TIMEOUT for request %v\n", clientId, id)
+          //rcvingTime = time.Now()
+          succeeded = false
+          toFired = true
+
+        default:
+      }
+
+      if succeeded {
+        if *check {
+          rsp[id] = true
+        }
+        reqsCount++
+        break
+      } else if toFired {
+        break
+      }
+
+      //if repliedCmdId != -1 && repliedCmdId < id {
+        // update latency if this response actually arrived ealier
+        //newLat := int64(rcvingTime.Sub(timestamps[repliedCmdId]) / time.Microsecond)
+        //if newLat < latencies[repliedCmdId] {
+        //	latencies[repliedCmdId] = newLat
+        //}
+      //}
+    } // end of foor loop waiting for result
+   // end of copilot
+
     return EaaS.EAAS_W_EC_SUCCESS
 }
 
